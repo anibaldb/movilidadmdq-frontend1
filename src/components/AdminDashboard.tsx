@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Save, AlertCircle, CheckCircle2, ArrowLeft, Settings, Search, UserMinus, User, BarChart3, Calendar, MapPin, ClipboardList } from 'lucide-react';
 
@@ -34,6 +34,27 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ session, onBack, onNavi
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  // Tarifa vigente: se usa para mostrar los valores actuales como placeholder.
+  const [tarifaActual, setTarifaActual] = useState<Record<string, number | null> | null>(null);
+
+  const cargarTarifaActual = async () => {
+    try {
+      const response = await fetch(`${apiUrl}/admin/tarifas/taxi`, {
+        headers: { Authorization: `Bearer ${session.token}` },
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      setTarifaActual(data);
+    } catch {
+      // Si falla, quedan los placeholders de ejemplo por defecto.
+    }
+  };
+
+  useEffect(() => {
+    void cargarTarifaActual();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Estados para búsqueda de usuario
   const [searchQuery, setSearchQuery] = useState('');
@@ -148,6 +169,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ session, onBack, onNavi
     setError(null);
     setSuccess(false);
 
+    // Actualización parcial: solo mandamos los campos que el admin completó.
+    // Los que deja en blanco conservan su valor actual (mostrado en el placeholder).
+    const payload: Record<string, number> = {};
+    if (formData.bajadaBanderaDia !== '') payload.bajadaBanderaDia = parseFloat(formData.bajadaBanderaDia);
+    if (formData.bajadaBanderaNoche !== '') payload.bajadaBanderaNoche = parseFloat(formData.bajadaBanderaNoche);
+    if (formData.valorFichaDia !== '') payload.valorFichaDia = parseFloat(formData.valorFichaDia);
+    if (formData.valorFichaNoche !== '') payload.valorFichaNoche = parseFloat(formData.valorFichaNoche);
+    if (formData.metrosPorFicha !== '') payload.metrosPorFicha = parseInt(formData.metrosPorFicha, 10);
+
+    if (Object.keys(payload).length === 0) {
+      setError('No modificaste ningún valor. Completá al menos un campo para actualizar.');
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch(`${apiUrl}/admin/tarifas/taxi`, {
         method: 'PUT',
@@ -155,19 +191,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ session, onBack, onNavi
           'Content-Type': 'application/json',
           Authorization: `Bearer ${session.token}`,
         },
-        body: JSON.stringify({
-          bajadaBanderaDia: parseFloat(formData.bajadaBanderaDia),
-          bajadaBanderaNoche: parseFloat(formData.bajadaBanderaNoche),
-          valorFichaDia: parseFloat(formData.valorFichaDia),
-          valorFichaNoche: parseFloat(formData.valorFichaNoche),
-          metrosPorFicha: parseInt(formData.metrosPorFicha, 10),
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
         throw new Error('No se pudo actualizar la tarifa. Verifica tus permisos.');
       }
 
+      const tarifaGuardada = await response.json();
+      setTarifaActual(tarifaGuardada);
+      setFormData({
+        bajadaBanderaDia: '',
+        bajadaBanderaNoche: '',
+        valorFichaDia: '',
+        valorFichaNoche: '',
+        metrosPorFicha: '',
+      });
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
@@ -206,7 +245,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ session, onBack, onNavi
       <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-xl shadow-gray-200/50 dark:shadow-black/40 border border-transparent dark:border-gray-800">
         <h2 className="text-xl font-black text-gray-900 dark:text-white mb-2">Configuración de Tarifa</h2>
         <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-6">
-          Ajustá la tarifa del taxi (bajada de bandera, fichas y metros) para toda la plataforma.
+          Ajustá la tarifa del taxi (bajada de bandera, fichas y metros) para toda la plataforma. En gris se muestra el valor actual; dejá en blanco lo que no quieras cambiar.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -223,11 +262,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ session, onBack, onNavi
                 <input
                   type="number"
                   step="0.01"
-                  required
                   value={formData[campo.key]}
                   onChange={(e) => setFormData({ ...formData, [campo.key]: e.target.value })}
                   className="w-full rounded-2xl bg-gray-50 dark:bg-gray-800 py-4 pl-8 pr-4 text-gray-900 dark:text-gray-100 font-bold outline-none transition-all focus:ring-2 focus:ring-black dark:focus:ring-white"
-                  placeholder={campo.placeholder}
+                  placeholder={tarifaActual && tarifaActual[campo.key] != null ? `Actual: $${tarifaActual[campo.key]}` : campo.placeholder}
                 />
               </div>
             </div>
@@ -239,11 +277,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ session, onBack, onNavi
               <input
                 type="number"
                 step="1"
-                required
                 value={formData.metrosPorFicha}
                 onChange={(e) => setFormData({ ...formData, metrosPorFicha: e.target.value })}
                 className="w-full rounded-2xl bg-gray-50 dark:bg-gray-800 py-4 px-4 text-gray-900 dark:text-gray-100 font-bold outline-none transition-all focus:ring-2 focus:ring-black dark:focus:ring-white"
-                placeholder="Ej: 160"
+                placeholder={tarifaActual && tarifaActual.metrosPorFicha != null ? `Actual: ${tarifaActual.metrosPorFicha} m` : 'Ej: 160'}
               />
             </div>
           </div>
